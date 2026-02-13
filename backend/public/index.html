@@ -1,11 +1,164 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>AI Draw Battle</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Draw Battle</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; text-align: center; background: #f0f2f5; margin: 0; padding: 20px; }
+        #gameScreen, #resultsScreen { display: none; }
+        canvas { border: 2px solid #333; background: white; cursor: crosshair; touch-action: none; max-width: 100%; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .hud { display: flex; justify-content: space-between; padding: 15px; max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .btn { padding: 12px 24px; background: #007bff; color: white; border: none; cursor: pointer; border-radius: 5px; font-size: 16px; margin: 5px; transition: background 0.2s; }
+        .btn:hover { background: #0056b3; }
+        .btn:disabled { background: #ccc; cursor: not-allowed; }
+        #playerList { list-style: none; padding: 0; max-width: 600px; margin: 20px auto; }
+        #playerList li { padding: 10px; background: #fff; margin: 5px; border-radius: 4px; display: flex; justify-content: space-between; border-bottom: 1px solid #eee; }
+        input { padding: 12px; font-size: 16px; margin: 5px; border-radius: 4px; border: 1px solid #ccc; width: 80%; }
+        .card { background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); max-width: 400px; margin: 50px auto; }
+    </style>
 </head>
 <body>
-<h1>AI Draw Battle</h1>
-<p>Frontend placeholder (full code as provided)</p>
+
+    <div id="loginScreen" class="card">
+        <h1>🎨 AI Art Battle</h1>
+        <input type="text" id="username" placeholder="Your Name" required><br>
+        <input type="text" id="roomCode" placeholder="Room Code (e.g. ROOM1)" required><br><br>
+        <button class="btn" onclick="joinGame()" style="width: 100%">Join Game</button>
+        <p id="status" style="margin-top: 20px; color: #666;"></p>
+    </div>
+
+    <div id="gameScreen">
+        <div class="hud">
+            <div>Round: <span id="currentRound">1</span>/3</div>
+            <div style="font-weight: bold; font-size: 1.2em;">Draw: <span id="topicDisplay" style="color:#d63384">?</span></div>
+            <div>Time: <span id="timer">30</span></div>
+        </div>
+        <br>
+        <canvas id="drawingCanvas" width="600" height="400"></canvas>
+        <br>
+        <div id="controls">
+            <button class="btn" id="submitBtn" onclick="submitDrawing()">Submit Drawing</button>
+            <button class="btn" style="background:#dc3545" onclick="clearCanvas()">Clear</button>
+        </div>
+        <h3>Leaderboard</h3>
+        <ul id="playerList"></ul>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const canvas = document.getElementById('drawingCanvas');
+        const ctx = canvas.getContext('2d');
+        let isDrawing = false;
+        let myRoom = '';
+
+        // Mobile Responsive Canvas
+        function resizeCanvas() {
+            if(window.innerWidth < 620) {
+                canvas.style.width = '100%';
+                canvas.style.height = 'auto';
+            }
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // --- DRAWING LOGIC ---
+        canvas.addEventListener('mousedown', startDraw);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', endDraw);
+        canvas.addEventListener('mouseout', endDraw);
+        // Touch Support (Mobile)
+        canvas.addEventListener('touchstart', (e) => { startDraw(e.touches[0]); e.preventDefault(); });
+        canvas.addEventListener('touchmove', (e) => { draw(e.touches[0]); e.preventDefault(); });
+        canvas.addEventListener('touchend', endDraw);
+
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: (e.clientX - rect.left) * (canvas.width / rect.width),
+                y: (e.clientY - rect.top) * (canvas.height / rect.height)
+            };
+        }
+
+        function startDraw(e) {
+            isDrawing = true;
+            const pos = getPos(e);
+            ctx.beginPath();
+            ctx.moveTo(pos.x, pos.y);
+        }
+        function draw(e) {
+            if (!isDrawing) return;
+            const pos = getPos(e);
+            ctx.lineWidth = 4;
+            ctx.lineCap = 'round';
+            ctx.strokeStyle = 'black';
+            ctx.lineTo(pos.x, pos.y);
+            ctx.stroke();
+        }
+        function endDraw() { isDrawing = false; }
+        function clearCanvas() { ctx.clearRect(0, 0, canvas.width, canvas.height); }
+
+        // --- GAME INTERACTION ---
+        function joinGame() {
+            const name = document.getElementById('username').value;
+            const room = document.getElementById('roomCode').value.toUpperCase();
+            if(!name || !room) return alert("Please fill in name and room code");
+            
+            myRoom = room;
+            socket.emit('joinRoom', { name, roomCode: room });
+            
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('gameScreen').style.display = 'block';
+            document.getElementById('status').innerText = "Connecting...";
+        }
+
+        function submitDrawing() {
+            const image = canvas.toDataURL('image/jpeg', 0.5); 
+            socket.emit('submitDrawing', { roomCode: myRoom, image });
+            document.getElementById('submitBtn').disabled = true;
+            document.getElementById('submitBtn').innerText = "AI is Judging...";
+        }
+
+        // --- SOCKET EVENTS ---
+        socket.on('updatePlayerList', (players) => {
+            const list = document.getElementById('playerList');
+            list.innerHTML = players.map(p => `<li><span>${p.name}</span> <strong>${p.score} pts</strong></li>`).join('');
+        });
+
+        socket.on('newRound', (data) => {
+            clearCanvas();
+            document.getElementById('submitBtn').disabled = false;
+            document.getElementById('submitBtn').innerText = "Submit Drawing";
+            document.getElementById('currentRound').innerText = data.round;
+            document.getElementById('topicDisplay').innerText = data.topic;
+        });
+
+        socket.on('timerUpdate', (time) => {
+            document.getElementById('timer').innerText = time;
+            if(time <= 5) document.getElementById('timer').style.color = 'red';
+            else document.getElementById('timer').style.color = 'black';
+        });
+
+        socket.on('drawingRated', (data) => {
+            alert(`AI rated your drawing: ${data.points} points!`);
+        });
+
+        socket.on('roundEnded', (players) => {
+            let msg = "Round Over! Scores:\n";
+            players.forEach(p => msg += `${p.name}: ${p.score}\n`);
+            alert(msg);
+        });
+
+        socket.on('gameOver', (winner) => {
+            alert(`GAME OVER! The winner is ${winner.name} with ${winner.score} points!`);
+            location.reload();
+        });
+
+        socket.on('errorMsg', (msg) => {
+            alert(msg);
+            location.reload();
+        });
+    </script>
 </body>
 </html>
