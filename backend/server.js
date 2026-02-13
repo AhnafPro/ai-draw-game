@@ -6,6 +6,16 @@ const path = require('path');
 const axios = require('axios');
 
 app.use(express.static(path.join(__dirname, 'public')));
+// --- FORCE INDEX.HTML LOAD ---
+app.get('/', (req, res) => {
+    const filePath = path.join(__dirname, 'public', 'index.html');
+    res.sendFile(filePath, (err) => {
+        if (err) {
+            console.error("Error sending file:", err);
+            res.status(500).send("Error loading game: " + err.message);
+        }
+    });
+});
 app.use(express.json());
 
 const MAX_PLAYERS = 5;
